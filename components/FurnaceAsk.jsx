@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 
-const $$ = (n) => `$${Number(n || 0).toFixed(4)}`; // pretty money
-
+const $$ = (n) => `$${Number(n || 0).toFixed(2)}`;
 /** Minimal OpenAI pricing table (USD per 1K tokens). */
 const OPENAI_PRICING = {
   "gpt-4o-mini": { in: 0.1500, out: 0.6000 },
