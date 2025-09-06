@@ -1,10 +1,8 @@
 import React, { useMemo, useState } from "react";
 
-const $$ = (n) => `$${Number(n || 0).toFixed(4)}`; // 4 dp for token costs
+const $$ = (n) => `$${Number(n || 0).toFixed(4)}`; // pretty money
 
-/** Minimal OpenAI pricing table (USD per 1K tokens).
- *  Adjust values/models if needed for your demo.
- */
+/** Minimal OpenAI pricing table (USD per 1K tokens). */
 const OPENAI_PRICING = {
   "gpt-4o-mini": { in: 0.1500, out: 0.6000 },
   "gpt-4o":      { in: 5.0000, out: 15.0000 },
@@ -17,41 +15,49 @@ const PROVIDERS = [
 ];
 
 export default function FurnaceAsk() {
-  // Provider & balances
+  // Provider
   const [provider, setProvider] = useState("openai");
-  const [balance, setBalance]   = useState(25.0);
-  const [budget, setBudget]     = useState(5.0);
 
-  // ---- OpenAI estimator inputs (BEFORE you start) ----
+  // Inputs stored as STRINGS so fields can be blank
+  const [balance, setBalance] = useState("25");
+  const [budget, setBudget]   = useState("5");
+
+  // Estimator (OpenAI) – strings
   const [model, setModel] = useState("gpt-4o-mini");
-  const [promptTok, setPromptTok] = useState(2000);       // input tokens estimate
-  const [completionTok, setCompletionTok] = useState(1000); // output tokens estimate
+  const [promptTok, setPromptTok] = useState("2000");
+  const [completionTok, setCompletionTok] = useState("1000");
 
-  // ---- Runtime tally ----
-  const [active, setActive]     = useState(false);
-  const [burned, setBurned]     = useState(0);
-  const [results, setResults]   = useState([]); // [{i,cost,info}]
-  const [nextCost, setNextCost] = useState(0.10);
+  // Runtime tally
+  const [active, setActive]   = useState(false);
+  const [burned, setBurned]   = useState(0);
+  const [results, setResults] = useState([]); // {i,cost,info}
 
-  // Optional: auto-calc each result cost from tokens during run
+  // Per-result entry (strings)
   const [autoFromTokens, setAutoFromTokens] = useState(true);
-  const [runPromptTok, setRunPromptTok] = useState(0);
-  const [runCompletionTok, setRunCompletionTok] = useState(0);
+  const [runPromptTok, setRunPromptTok] = useState("");
+  const [runCompletionTok, setRunCompletionTok] = useState("");
+  const [nextCost, setNextCost] = useState("0.10");
 
-  // ---- Derivations ----
+  // Safely convert when needed
+  const balanceNum = Number(balance) || 0;
+  const budgetNum  = Number(budget) || 0;
+
   const price = OPENAI_PRICING[model] || OPENAI_PRICING["gpt-4o-mini"];
+
   const estimatedTotal = useMemo(() => {
     if (provider !== "openai") return 0;
-    const costIn  = (Number(promptTok)     / 1000) * price.in;
-    const costOut = (Number(completionTok) / 1000) * price.out;
+    const inTok  = Number(promptTok) || 0;
+    const outTok = Number(completionTok) || 0;
+    const costIn  = (inTok  / 1000) * price.in;
+    const costOut = (outTok / 1000) * price.out;
     return costIn + costOut;
   }, [provider, promptTok, completionTok, price]);
 
-  const remaining = Math.max(0, budget - burned);
-  const pct = Math.min(100, Math.round((burned / Math.max(1e-9, budget)) * 100));
-  const over = burned > budget;
+  const remaining = Math.max(0, budgetNum - burned);
+  const pct = Math.min(100, Math.round((burned / Math.max(1e-9, budgetNum)) * 100));
+  const over = burned > budgetNum;
 
-  // ---- Actions ----
+  // Actions
   function start() {
     setActive(true);
     setBurned(0);
@@ -65,10 +71,12 @@ export default function FurnaceAsk() {
     let info = "";
 
     if (provider === "openai" && autoFromTokens) {
-      const iCost  = (Number(runPromptTok)     / 1000) * price.in;
-      const oCost  = (Number(runCompletionTok) / 1000) * price.out;
+      const inTok  = Number(runPromptTok) || 0;
+      const outTok = Number(runCompletionTok) || 0;
+      const iCost  = (inTok  / 1000) * price.in;
+      const oCost  = (outTok / 1000) * price.out;
       cost = iCost + oCost;
-      info = `${runPromptTok} in / ${runCompletionTok} out tokens`;
+      info = `${inTok} in / ${outTok} out tokens`;
     } else {
       cost = Math.max(0, Number(nextCost) || 0);
       info = "manual";
@@ -79,9 +87,9 @@ export default function FurnaceAsk() {
     setResults((r) => [...r, { i: r.length + 1, cost, info }]);
     setBurned((b) => b + cost);
 
-    // reset per-result token inputs for convenience
-    setRunPromptTok(0);
-    setRunCompletionTok(0);
+    // reset token fields for the next result
+    setRunPromptTok("");
+    setRunCompletionTok("");
   }
 
   function undo() {
@@ -93,22 +101,23 @@ export default function FurnaceAsk() {
 
   function finish() {
     if (!active) return;
-    setBalance((bal) => Math.max(0, bal - burned));
+    const newBal = Math.max(0, balanceNum - burned);
+    setBalance(String(Number(newBal.toFixed(2)))); // keep input friendly
     setActive(false);
   }
 
   function reset() {
     setProvider("openai");
-    setBalance(25); setBudget(5);
-    setModel("gpt-4o-mini"); setPromptTok(2000); setCompletionTok(1000);
-    setBurned(0); setResults([]); setActive(false); setNextCost(0.10);
-    setAutoFromTokens(true); setRunPromptTok(0); setRunCompletionTok(0);
+    setBalance("25"); setBudget("5");
+    setModel("gpt-4o-mini"); setPromptTok("2000"); setCompletionTok("1000");
+    setBurned(0); setResults([]); setActive(false);
+    setAutoFromTokens(true); setRunPromptTok(""); setRunCompletionTok("");
+    setNextCost("0.10");
   }
 
   async function fetchBalance() {
-    // No stable public balance endpoint for OpenAI; show honest note.
     if (provider === "openai") {
-      alert("OpenAI: live balance isn’t exposed via public API. Furnace estimates costs from tokens & published prices.");
+      alert("OpenAI live balance isn’t exposed publicly. Furnace estimates using tokens × published prices.");
       return;
     }
     alert("Custom provider: enter balance manually.");
@@ -130,8 +139,8 @@ export default function FurnaceAsk() {
 
       {/* Stats */}
       <div className="grid">
-        <div className="card stat"><div className="k">Balance</div><div className="v">{$$(balance)}</div></div>
-        <div className="card stat"><div className="k">Budget (ask)</div><div className="v">{$$(budget)}</div></div>
+        <div className="card stat"><div className="k">Balance</div><div className="v">{$$(balanceNum)}</div></div>
+        <div className="card stat"><div className="k">Budget (ask)</div><div className="v">{$$(budgetNum)}</div></div>
         <div className="card stat"><div className="k">Estimate</div><div className="v">{$$(provider === "openai" ? estimatedTotal : 0)}</div></div>
         <div className={`card stat ${over ? "hot" : ""}`}><div className="k">Burned</div><div className="v">{$$(burned)}</div></div>
       </div>
@@ -144,8 +153,8 @@ export default function FurnaceAsk() {
         </div>
         <div className="bar"><div className={`fill ${over ? "fill-hot" : ""}`} style={{ width: `${pct}%` }} /></div>
         <div className="row between meta">
-          <span>{pct}% of {$$(budget)}</span>
-          <span>{over ? `Over by ${$$(burned - budget)}` : `Remaining ${$$(remaining)}`}</span>
+          <span>{pct}% of {$$(budgetNum)}</span>
+          <span>{over ? `Over by ${$$(burned - budgetNum)}` : `Remaining ${$$(remaining)}`}</span>
         </div>
       </div>
 
@@ -162,14 +171,14 @@ export default function FurnaceAsk() {
           <div className="row">
             <label>Balance left</label>
             <div className="inline">
-              <input type="number" step="0.01" value={balance} onChange={(e)=>setBalance(Number(e.target.value||0))}/>
+              <input type="number" step="0.01" value={balance} onChange={(e)=>setBalance(e.target.value)} />
               <button className="ghost" onClick={fetchBalance}>Fetch</button>
             </div>
           </div>
 
           <div className="row">
             <label>Budget for this ask</label>
-            <input type="number" step="0.01" value={budget} onChange={(e)=>setBudget(Number(e.target.value||0))}/>
+            <input type="number" step="0.01" value={budget} onChange={(e)=>setBudget(e.target.value)} />
           </div>
 
           {provider === "openai" && (
@@ -182,15 +191,15 @@ export default function FurnaceAsk() {
               </div>
               <div className="row">
                 <label>Prompt tokens (estimate)</label>
-                <input type="number" step="1" value={promptTok} onChange={(e)=>setPromptTok(Number(e.target.value||0))}/>
+                <input type="number" step="1" value={promptTok} onChange={(e)=>setPromptTok(e.target.value)} />
               </div>
               <div className="row">
                 <label>Completion tokens (estimate)</label>
-                <input type="number" step="1" value={completionTok} onChange={(e)=>setCompletionTok(Number(e.target.value||0))}/>
+                <input type="number" step="1" value={completionTok} onChange={(e)=>setCompletionTok(e.target.value)} />
               </div>
               <div className="row">
                 <label>Estimated total</label>
-                <input type="number" step="0.0001" value={estimatedTotal} readOnly />
+                <input type="number" step="0.0001" value={String(estimatedTotal)} readOnly />
               </div>
             </>
           )}
@@ -212,7 +221,7 @@ export default function FurnaceAsk() {
       {active && (
         <div className="card">
           <div className={`note ${over ? "note-hot" : "note-ok"}`}>
-            {over ? `⚠️ Over budget by ${$$(burned - budget)}`
+            {over ? `⚠️ Over budget by ${$$(burned - budgetNum)}`
                   : `Within budget • Remaining ${$$(remaining)} • Tally after each agent output`}
           </div>
 
@@ -222,12 +231,12 @@ export default function FurnaceAsk() {
               <div className="inline">
                 <input
                   type="number" step="1" placeholder="prompt"
-                  value={runPromptTok} onChange={(e)=>setRunPromptTok(Number(e.target.value||0))}
+                  value={runPromptTok} onChange={(e)=>setRunPromptTok(e.target.value)}
                   title="Prompt tokens for this result"
                 />
                 <input
                   type="number" step="1" placeholder="completion"
-                  value={runCompletionTok} onChange={(e)=>setRunCompletionTok(Number(e.target.value||0))}
+                  value={runCompletionTok} onChange={(e)=>setRunCompletionTok(e.target.value)}
                   title="Completion tokens for this result"
                 />
                 <label style={{ width: "auto", color: "#9aa3b2", fontSize: 12 }}>
@@ -247,7 +256,7 @@ export default function FurnaceAsk() {
             <div className="row">
               <label>Manual result cost</label>
               <div className="inline">
-                <input type="number" step="0.0001" value={nextCost} onChange={(e)=>setNextCost(Number(e.target.value||0))}/>
+                <input type="number" step="0.0001" value={nextCost} onChange={(e)=>setNextCost(e.target.value)} />
               </div>
             </div>
           )}
@@ -276,7 +285,7 @@ export default function FurnaceAsk() {
       {!active && results.length > 0 && (
         <div className="card">
           <div className="row"><b>This ask used:</b>&nbsp; {$$(burned)}</div>
-          <div className="row"><b>New balance:</b>&nbsp; {$$(balance)}</div>
+          <div className="row"><b>New balance:</b>&nbsp; {$$(balanceNum)}</div>
           <div className="actions">
             <button className="ghost" onClick={reset}>Start new ask</button>
           </div>

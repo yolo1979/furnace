@@ -1,53 +1,180 @@
-/* Base layout */
-:root { --bg:#0f1115; --panel:#12141a; --line:#1c2030; --text:#f6f7f9; --muted:#9aa3b2;
-        --accent:#ff5a3c; --ok:#16a34a; --hot:#ef4444; }
-*{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Inter,system-ui,sans-serif}
-main{max-width:920px;margin:0 auto;padding:24px}
+/* globals.css - Apple esque clean theme */
 
-/* Header */
-.hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-.brand{display:flex;gap:12px;align-items:center}
-.flame{font-size:24px}
-.title{font-size:22px;font-weight:800;letter-spacing:.2px}
-.subtitle{font-size:13px;color:var(--muted)}
-.badge{background:#232a3a;border:1px solid var(--line);padding:6px 10px;border-radius:999px;color:#cfd6e6;font-size:12px}
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: #f9f9f9;
+  color: #111;
+  line-height: 1.5;
+}
 
-/* Cards & grid */
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);margin-bottom:12px}
-.stat .k{color:var(--muted);font-size:12px;margin-bottom:6px}
-.stat .v{font-size:20px;font-weight:700}
-.stat.hot .v{color:#ffd0c6}
+.dash {
+  max-width: 800px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
 
-/* Rows & inputs */
-.row{display:flex;align-items:center;gap:12px;margin:10px 0}
-.row.between{justify-content:space-between}
-.inline{display:flex;align-items:center;gap:8px}
-label{width:200px;color:var(--muted);font-size:14px}
-input[type="number"], select{height:36px;padding:0 10px;border-radius:8px;border:1px solid #2a2f44;background:#0e1016;color:var(--text);min-width:160px}
-.select{min-width:260px}
+.hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
 
-/* Buttons */
-button{height:36px;border-radius:8px;border:0;cursor:pointer;padding:0 14px}
-button:hover{opacity:.95}
-.cta{background:var(--accent);color:#fff;font-weight:800}
-.ghost{background:transparent;color:#cfd6e6;border:1px solid #2a2f44}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
 
-/* Pills & notes */
-.pill{padding:4px 10px;border-radius:999px;font-size:12px;border:1px solid #2a2f44}
-.pill-ok{background:#0f2314;color:#b9ffd1;border-color:#214b2a}
-.pill-hot{background:#2a1412;color:#ffd0c6;border-color:#4b2721}
-.note{padding:10px 12px;border-radius:10px;font-size:14px;margin:6px 0}
-.note-ok{background:#112516;color:#b9ffd1;border:1px solid #214b2a}
-.note-hot{background:#2a1412;color:#ffd0c6;border:1px solid #4b2721}
+.brand .title {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
 
-/* Progress bar */
-.bar{height:10px;background:#0d0f15;border:1px solid #23283a;border-radius:999px;overflow:hidden;margin:8px 0}
-.fill{height:100%;background:linear-gradient(90deg,#22c55e,#84cc16);width:0%}
-.fill-hot{background:linear-gradient(90deg,#f97316,#ef4444)}
-.meta{color:#cfd6e6;font-size:12px}
+.subtitle {
+  font-size: 0.9rem;
+  color: #666;
+}
 
-/* Misc */
-.tally{display:flex;gap:18px;color:#cfd6e6;font-size:14px;margin-top:4px}
-.actions{display:flex;gap:10px;margin-top:8px}
+.badge {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 8px;
+  background: #e5e5e5;
+  color: #333;
+}
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+
+.stat {
+  text-align: center;
+}
+
+.stat .k {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 0.2rem;
+}
+
+.stat .v {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #111;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.inline {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+input, select {
+  font-size: 1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  flex: 1;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: background 0.15s;
+}
+
+button.cta {
+  background: #007aff;
+  color: #fff;
+}
+
+button.cta:hover {
+  background: #0066d6;
+}
+
+button.ghost {
+  background: #f2f2f2;
+  color: #333;
+}
+
+button.ghost:hover {
+  background: #e6e6e6;
+}
+
+.bar {
+  background: #eee;
+  border-radius: 8px;
+  height: 10px;
+  margin: 0.8rem 0;
+  overflow: hidden;
+}
+
+.fill {
+  background: #007aff;
+  height: 100%;
+}
+
+.fill-hot {
+  background: #ff3b30;
+}
+
+.pill {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+}
+
+.pill-ok {
+  background: #d6f5d6;
+  color: #111;
+}
+
+.pill-hot {
+  background: #ffd6d6;
+  color: #c00;
+}
+
+.note {
+  font-size: 0.9rem;
+  padding: 0.6rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.note-ok {
+  background: #f0f9ff;
+  color: #0366d6;
+}
+
+.note-hot {
+  background: #fff4f4;
+  color: #c00;
+}
+
+.tally {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
