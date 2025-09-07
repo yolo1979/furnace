@@ -1,324 +1,409 @@
 // components/FurnaceAsk.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-const $$ = (n) => `$${Number(n || 0).toFixed(2)}`;
+const formatMoney = (n) => `$${Number(n || 0).toFixed(2)}`;
 
-const OPENAI_PRICING = {
-  "gpt-4o-mini": { in: 0.1500, out: 0.6000 },
-  "gpt-4o":      { in: 5.0000,  out: 15.0000 },
-  "gpt-3.5":     { in: 0.5000,  out: 1.5000 },
+const OPENAI_PRICES = {
+  // example pricing (per 1K tokens)
+  "gpt-4o-mini": { prompt: 0.0005, completion: 0.0015 },
+  "gpt-4o": { prompt: 0.005, completion: 0.015 },
+  "gpt-4.1-mini": { prompt: 0.003, completion: 0.006 },
 };
 
 const PROVIDERS = [
-  { id: "openai", name: "OpenAI (token-based)" },
-  { id: "custom", name: "Other / Custom (manual)" },
+  { id: "openai", label: "OpenAI (token-based)" },
+  { id: "replit", label: "Replit (manual balance)" },
 ];
 
 export default function FurnaceAsk() {
-  const [provider, setProvider] = useState("openai");
-  const [balance, setBalance] = useState("25");
-  const [budget, setBudget] = useState("5");
-
-  const [model, setModel] = useState("gpt-4o-mini");
-  const [promptTok, setPromptTok] = useState("2000");
-  const [completionTok, setCompletionTok] = useState("1000");
-
-  const [active, setActive] = useState(false);
+  // top summary
+  const [balance, setBalance] = useState(25);
+  const [budget, setBudget] = useState(5);
+  const [estimate, setEstimate] = useState(0.9);
   const [burned, setBurned] = useState(0);
-  const [results, setResults] = useState([]);
-  const [steps, setSteps] = useState([]);
 
-  const [autoFromTokens, setAutoFromTokens] = useState(true);
-  const [runPromptTok, setRunPromptTok] = useState("");
-  const [runCompletionTok, setRunCompletionTok] = useState("");
-  const [nextCost, setNextCost] = useState("0.10");
+  // form
+  const [provider, setProvider] = useState("openai");
+  const [model, setModel] = useState("gpt-4o-mini");
+  const [promptTokens, setPromptTokens] = useState(2000);
+  const [completionTokens, setCompletionTokens] = useState(1000);
 
-  const balanceNum = Number(balance) || 0;
-  const budgetNum = Number(budget) || 0;
-  const price = OPENAI_PRICING[model] || OPENAI_PRICING["gpt-4o-mini"];
+  // UI / popout sync
+  const bcRef = useRef(null);
+  const [tracking, setTracking] = useState(false);
 
-  const estimatedTotal = useMemo(() => {
-    if (provider !== "openai") return 0;
-    const inTok = Number(promptTok) || 0;
-    const outTok = Number(completionTok) || 0;
-    return (inTok / 1000) * price.in + (outTok / 1000) * price.out;
-  }, [provider, promptTok, completionTok, price]);
+  // derived
+  const remaining = useMemo(() => Math.max(budget - burned, 0), [budget, burned]);
+  const within = useMemo(() => burned <= budget, [burned, budget]);
 
-  const remaining = Math.max(0, budgetNum - burned);
-  const pct = Math.min(100, Math.round((burned / Math.max(1e-9, budgetNum)) * 100));
-  const over = burned >= budgetNum;
-
-  // ------- Broadcast to popout + POST to API for menubar -------
-  const channelRef = useRef(null);
+  // connect BroadcastChannel for live tally (dashboard + popout + menubar widget)
   useEffect(() => {
-    try { channelRef.current = new BroadcastChannel("furnace-tally"); }
-    catch { channelRef.current = null; }
-    return () => { try { channelRef.current?.close(); } catch {} };
+    try {
+      bcRef.current = new BroadcastChannel("furnace-tally");
+      return () => bcRef.current?.close();
+    } catch {
+      bcRef.current = null;
+    }
   }, []);
 
-  const publishTally = (extra = {}) => {
+  // helper: push current tally to other windows + localStorage
+  const pushTally = (extraSteps = []) => {
     const payload = {
       burned,
+      budget,
+      balance,
       remaining,
-      budget: budgetNum,
-      balance: balanceNum,
-      results,
-      steps,
-      active,
-      provider,
-      model,
+      results: extraSteps,
       ts: Date.now(),
-      ...extra,
     };
-
-    // pop-out window
-    try { channelRef.current?.postMessage(payload); } catch {}
-    try { localStorage.setItem("furnace:tally", JSON.stringify(payload)); } catch {}
-
-    // NEW: send to API so the menubar app can read it
     try {
-      fetch("/api/tally/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        keepalive: true, // best effort even when navigating away
-      });
+      localStorage.setItem("furnace:tally", JSON.stringify(payload));
+    } catch {}
+    try {
+      bcRef.current?.postMessage(payload);
     } catch {}
   };
 
-  useEffect(() => { publishTally(); },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [burned, remaining, budgetNum, balanceNum, results, steps, active, provider, model]
-  );
+  // estimate calculator (for OpenAI)
+  useEffect(() => {
+    if (provider !== "openai") return;
+    const price = OPENAI_PRICES[model] || OPENAI_PRICES["gpt-4o-mini"];
+    const dollars =
+      ((promptTokens / 1000) * price.prompt || 0) +
+      ((completionTokens / 1000) * price.completion || 0);
+    setEstimate(Number(dollars.toFixed(2)));
+  }, [provider, model, promptTokens, completionTokens]);
 
-  // ------- Actions -------
-  function start() {
-    setActive(true);
-    setBurned(0);
-    setResults([]);
-    setSteps([]);
-    publishTally({ started: true });
-  }
+  // fetch balance (stub for demo)
+  const fetchBalance = async () => {
+    // In a real connector, call your provider API here.
+    // We’ll just retain the current value (so the button is “demo-safe”).
+    setBalance((b) => b);
+  };
 
-  function addResult() {
-    if (!active || over) return;
+  // -------- Slack integration helpers --------
 
-    let cost = 0;
-    let info = "";
-
-    if (provider === "openai" && autoFromTokens) {
-      const inTok = Number(runPromptTok) || 0;
-      const outTok = Number(runCompletionTok) || 0;
-      cost = (inTok / 1000) * price.in + (outTok / 1000) * price.out;
-      info = `${inTok} in / ${outTok} out`;
-    } else {
-      cost = Math.max(0, Number(nextCost) || 0);
-      info = "manual";
+  async function postToSlack(message) {
+    try {
+      await fetch("/api/slack/post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: message }),
+      });
+    } catch (e) {
+      // Fail silently for demo; we don’t want UI to break if Slack is down.
+      console.warn("Slack post failed:", e);
     }
-    if (cost <= 0) return;
-
-    const entry = { i: results.length + 1, cost, info, ts: new Date().toLocaleTimeString() };
-    setResults((r) => [entry, ...r]);
-    setSteps((s) => [...s, cost]);
-    setBurned((b) => b + cost);
   }
 
-  function undo() {
-    if (!active || results.length === 0) return;
-    const last = results[0];
-    setResults((r) => r.slice(1));
-    setSteps((s) => s.slice(0, -1));
-    setBurned((b) => Math.max(0, b - last.cost));
+  // one “result” of an agent step gets tallied here
+  async function addResult(cost, info = "Agent step") {
+    const step = {
+      i: Date.now(),
+      ts: new Date().toLocaleTimeString(),
+      cost: Number(cost || 0),
+      info,
+    };
+    setBurned((prev) => {
+      const next = Number((prev + step.cost).toFixed(2));
+      // push to other windows
+      pushTally([step]);
+
+      // Slack alert for this step
+      const msg =
+        `🔥 Burn update\n` +
+        `• Step: ${info}\n` +
+        `• Cost: ${formatMoney(step.cost)}\n` +
+        `• Burned: ${formatMoney(next)} / Budget: ${formatMoney(budget)}\n` +
+        `• Remaining: ${formatMoney(Math.max(budget - next, 0))}`;
+      postToSlack(msg);
+
+      return next;
+    });
   }
 
-  function finish() {
-    if (!active) return;
-    const newBal = Math.max(0, balanceNum - burned);
-    setBalance(String(Number(newBal.toFixed(2))));
-    setActive(false);
-    publishTally({ finished: true });
-  }
+  // arm/run demo sequence
+  const runDemo = async () => {
+    setTracking(true);
+    pushTally(); // initial snapshot
 
-  function reset() {
-    setProvider("openai");
-    setBalance("25");
-    setBudget("5");
-    setModel("gpt-4o-mini");
-    setPromptTok("2000");
-    setCompletionTok("1000");
+    // simulate 3 steps
+    await wait(800);
+    await addResult(0.25, "Search + plan");
+    await wait(900);
+    await addResult(0.4, "Draft + refine");
+    await wait(800);
+    await addResult(0.2, "Validate + summarize");
+
+    setTracking(false);
+  };
+
+  const resetAll = () => {
     setBurned(0);
-    setResults([]);
-    setSteps([]);
-    setActive(false);
-    setAutoFromTokens(true);
-    setRunPromptTok("");
-    setRunCompletionTok("");
-    setNextCost("0.10");
-    publishTally({ reset: true });
-  }
+    pushTally([]);
+  };
 
-  function fetchBalance() {
-    if (provider === "openai") {
-      alert("OpenAI live balance isn’t public. Use estimate; Furnace tracks each result live.");
-      return;
-    }
-    alert("Custom provider: enter balance manually.");
-  }
+  // save latest snapshot (so API /popout/widget can read it)
+  useEffect(() => {
+    (async () => {
+      try {
+        await fetch("/api/tally/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            burned,
+            budget,
+            balance,
+            remaining,
+          }),
+        });
+      } catch {}
+    })();
+  }, [burned, budget, balance, remaining]);
 
-  function popOut() {
-    window.open("/tally", "FurnaceTally", "width=360,height=560,menubar=no,toolbar=no,location=no,status=no");
-  }
-
-  // ------- UI -------
   return (
-    <div className="container">
-      <h1>🔥 Furnace Dashboard</h1>
-      <p>See your balance, set a budget, and tally burn after each result.</p>
+    <div className="wrap">
+      <header className="hero">
+        <h1>🔥 Furnace Dashboard</h1>
+        <p>See your balance, set a budget, and tally burn after each result.</p>
+      </header>
 
-      <div className="stats">
-        <div className="stat"><strong>Balance</strong><span>{$$(balanceNum)}</span></div>
-        <div className="stat"><strong>Budget</strong><span>{$$(budgetNum)}</span></div>
-        <div className="stat"><strong>Estimate</strong><span>{$$(provider === "openai" ? estimatedTotal : 0)}</span></div>
-        <div className="stat"><strong>Burned</strong><span>{$$(burned)}</span></div>
+      <div className="cards">
+        <Stat title="Balance" value={formatMoney(balance)} />
+        <Stat title="Budget" value={formatMoney(budget)} />
+        <Stat title="Estimate" value={formatMoney(estimate)} />
+        <Stat title="Burned" value={formatMoney(burned)} />
       </div>
 
-      <div className="card">
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div>Budget usage</div>
-          <div className={`budget-status ${over ? "over" : "ok"}`}>{over ? "Over budget" : "Within budget"}</div>
-        </div>
-        <div className="progress">
-          <div className="progress-bar" style={{ width: `${Math.max(4, pct)}%`, background: over ? "#ff3b30" : "#007aff" }} />
-        </div>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
-          <div>{pct}% of {$$(budgetNum)}</div>
-          <div>{over ? `Over by ${$$(burned - budgetNum)}` : `Remaining ${$$(remaining)}`}</div>
-        </div>
-      </div>
+      <BudgetBar burned={burned} budget={budget} within={within} />
 
-      {!active && results.length === 0 && (
-        <div className="card">
-          <div className="form-row">
-            <label>Provider</label>
-            <select value={provider} onChange={(e)=>setProvider(e.target.value)}>
-              {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      <section className="panel">
+        <h3>Provider</h3>
+
+        <div className="grid">
+          <label>
+            Provider
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+            >
+              {PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
             </select>
-          </div>
+          </label>
 
-          <div className="form-row">
-            <label>Balance left</label>
-            <div className="inline">
-              <input type="number" step="0.01" value={balance} onChange={(e)=>setBalance(e.target.value)} />
-              <button className="secondary" onClick={fetchBalance}>Fetch</button>
+          <label>
+            Balance left
+            <div className="row">
+              <input
+                type="number"
+                value={balance}
+                onChange={(e) => setBalance(Number(e.target.value || 0))}
+              />
+              <button onClick={fetchBalance}>Fetch</button>
             </div>
-          </div>
+          </label>
 
-          <div className="form-row">
-            <label>Budget for this ask</label>
-            <input type="number" step="0.01" value={budget} onChange={(e)=>setBudget(e.target.value)} />
-          </div>
+          <label>
+            Budget for this ask
+            <input
+              type="number"
+              value={budget}
+              min={0}
+              onChange={(e) => setBudget(Number(e.target.value || 0))}
+            />
+          </label>
 
           {provider === "openai" && (
             <>
-              <div className="form-row">
-                <label>Model</label>
-                <select value={model} onChange={(e)=>setModel(e.target.value)}>
-                  {Object.keys(OPENAI_PRICING).map(m => <option key={m} value={m}>{m}</option>)}
+              <label className="span2">
+                Model
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                >
+                  {Object.keys(OPENAI_PRICES).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
                 </select>
-              </div>
-              <div className="form-row">
-                <label>Prompt tokens (estimate)</label>
-                <input type="number" step="1" value={promptTok} onChange={(e)=>setPromptTok(e.target.value)} />
-              </div>
-              <div className="form-row">
-                <label>Completion tokens (estimate)</label>
-                <input type="number" step="1" value={completionTok} onChange={(e)=>setCompletionTok(e.target.value)} />
-              </div>
-              <div className="form-row">
-                <label>Estimated total</label>
-                <input type="text" value={$$(+estimatedTotal)} readOnly />
-              </div>
+              </label>
+
+              <label>
+                Prompt tokens (estimate)
+                <input
+                  type="number"
+                  value={promptTokens}
+                  min={0}
+                  onChange={(e) =>
+                    setPromptTokens(Number(e.target.value || 0))
+                  }
+                />
+              </label>
+
+              <label>
+                Completion tokens (estimate)
+                <input
+                  type="number"
+                  value={completionTokens}
+                  min={0}
+                  onChange={(e) =>
+                    setCompletionTokens(Number(e.target.value || 0))
+                  }
+                />
+              </label>
+
+              <label className="span2">
+                Estimated total
+                <input type="text" value={formatMoney(estimate)} readOnly />
+              </label>
             </>
           )}
-
-          <div className="inline" style={{marginTop:8}}>
-            <button className="primary" onClick={start}>Time to Burn</button>
-            <button className="secondary" onClick={reset}>Reset</button>
-            <button className="secondary" onClick={popOut}>Pop out Live Tally</button>
-          </div>
         </div>
-      )}
 
-      {active && (
-        <div className="card">
-          <div className={`budget-status ${over ? "over" : "ok"}`} style={{marginBottom:12}}>
-            {over ? `Budget hit — raise cap or finish (over by ${$$(burned - budgetNum)})`
-                  : `Within budget • Remaining ${$$(remaining)} • Log each agent output`}
-          </div>
-
-          {provider === "openai" && (
-            <div className="form-row">
-              <label>Per result tokens</label>
-              <div className="inline">
-                <input type="number" step="1" placeholder="prompt" value={runPromptTok} onChange={(e)=>setRunPromptTok(e.target.value)} />
-                <input type="number" step="1" placeholder="completion" value={runCompletionTok} onChange={(e)=>setRunCompletionTok(e.target.value)} />
-                <label style={{fontSize:12, color:"#6e6e73"}}>
-                  <input type="checkbox" checked={autoFromTokens} onChange={(e)=>setAutoFromTokens(e.target.checked)} style={{marginRight:6}}/>
-                  auto-calc from tokens
-                </label>
-              </div>
-            </div>
-          )}
-
-          {!autoFromTokens && (
-            <div className="form-row">
-              <label>Manual result cost</label>
-              <input type="number" step="0.01" value={nextCost} onChange={(e)=>setNextCost(e.target.value)} />
-            </div>
-          )}
-
-          <div className="inline">
-            <button className="primary" onClick={addResult} disabled={over}>+ Burn step</button>
-            <button className="secondary" onClick={undo}>Undo</button>
-            <button className="secondary" onClick={finish}>Finish ask</button>
-            <button className="secondary" onClick={popOut}>Pop out Live Tally</button>
-          </div>
+        <div className="row">
+          <button onClick={runDemo} disabled={tracking}>
+            {tracking ? "Burning…" : "Time to Burn"}
+          </button>
+          <button onClick={resetAll} className="ghost">
+            Reset
+          </button>
+          <a
+            className="ghost"
+            href="/tally"
+            target="_blank"
+            rel="noreferrer"
+            title="Open the pop-out tally window"
+          >
+            Pop out Live Tally
+          </a>
         </div>
-      )}
+      </section>
 
-      {!active && results.length > 0 && (
-        <div className="card">
-          <div className="form-row"><b>This ask used:</b> {$$(burned)}</div>
-          <div className="form-row"><b>New balance:</b> {$$(balanceNum)}</div>
-          <button className="secondary" onClick={reset}>Start new ask</button>
-          <button className="secondary" onClick={popOut} style={{marginLeft:8}}>Pop out Live Tally</button>
-        </div>
-      )}
-
-      <div className="liveCard">
-        <div className="liveHeader">
-          <span>🔥 Live Tally</span>
-          <span className={over ? "pill over" : "pill ok"}>
-            {over ? "Cap reached" : "Tracking"}
-          </span>
-        </div>
-        <div className="liveRow"><b>Burned:</b> <span>{$$(burned)}</span></div>
-        <div className="liveRow"><b>Remaining:</b> <span>{$$(remaining)}</span></div>
-        <div className="liveRow"><b>Budget:</b> <span>{$$(budgetNum)}</span></div>
-        <div className="liveRow"><b>Balance:</b> <span>{$$(balanceNum)}</span></div>
-
-        <div className="liveLogTitle">Recent steps</div>
-        <div className="liveLog">
-          {results.length === 0 && <div className="muted">No steps yet…</div>}
-          {results.map(r => (
-            <div key={r.i} className="logItem">
-              <div>#{r.i} • {r.ts}</div>
-              <div className="muted">{r.info}</div>
-              <div className="cost">{$$(r.cost)}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* docked live tally (reads BroadcastChannel/localStorage) */}
+      <DockedTally />
+      <style jsx>{`
+        .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px; }
+        .hero h1 { margin: 0 0 6px; }
+        .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0 8px; }
+        .panel { background: #fff; border: 1px solid #e5e5ea; border-radius: 14px; padding: 16px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .grid .span2 { grid-column: span 2; }
+        label { display: grid; gap: 6px; font-size: 14px; color: #1d1d1f; }
+        input, select { height: 34px; border: 1px solid #dadada; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #fff; }
+        .row { display: flex; gap: 8px; align-items: center; }
+        button { height: 34px; padding: 0 12px; background: #007aff; color: white; border: 0; border-radius: 8px; font-weight: 600; }
+        .ghost { background: #f2f2f7; color: #1d1d1f; }
+      `}</style>
     </div>
   );
+}
+
+function Stat({ title, value }) {
+  return (
+    <div className="stat">
+      <div className="t">{title}</div>
+      <div className="v">{value}</div>
+      <style jsx>{`
+        .stat { background: #fff; border: 1px solid #e5e5ea; border-radius: 12px; padding: 12px; text-align: center; }
+        .t { font-size: 12px; color: #6e6e73; }
+        .v { font-weight: 700; margin-top: 4px; }
+      `}</style>
+    </div>
+  );
+}
+
+function BudgetBar({ burned, budget, within }) {
+  const pct = Math.min(100, (burned / Math.max(budget, 0.0001)) * 100);
+  return (
+    <div className="bar">
+      <div className="fill" style={{ width: `${pct}%`, background: within ? "#34c759" : "#ff3b30" }} />
+      <div className="info">
+        <span>{`0% of ${formatMoney(budget)}`}</span>
+        <span>{`Remaining ${formatMoney(Math.max(budget - burned, 0))}`}</span>
+      </div>
+      <style jsx>{`
+        .bar { position: relative; height: 10px; background: #f2f2f7; border: 1px solid #e5e5ea; border-radius: 999px; margin: 12px 0 18px; overflow: hidden; }
+        .fill { height: 100%; transition: width .35s ease; }
+        .info { display: flex; justify-content: space-between; font-size: 12px; color: #6e6e73; margin-top: 6px; }
+      `}</style>
+    </div>
+  );
+}
+
+function DockedTally() {
+  const [tally, setTally] = useState({ burned: 0, budget: 0, balance: 0, remaining: 0, results: [] });
+
+  useEffect(() => {
+    let chan;
+    try {
+      chan = new BroadcastChannel("furnace-tally");
+      chan.onmessage = (ev) => setTally(ev.data);
+    } catch {}
+    const pull = () => {
+      try {
+        const raw = localStorage.getItem("furnace:tally");
+        if (raw) setTally(JSON.parse(raw));
+      } catch {}
+    };
+    pull();
+    const intv = setInterval(pull, 1200);
+    return () => { chan?.close(); clearInterval(intv); };
+  }, []);
+
+  return (
+    <div className="dock">
+      <div className="head">
+        <span>🔥 Live Tally</span>
+        <span className="chip">Tracking</span>
+      </div>
+      <div className="rows">
+        <Row k="Burned" v={formatMoney(tally.burned)} />
+        <Row k="Remaining" v={formatMoney(tally.remaining)} />
+        <Row k="Budget" v={formatMoney(tally.budget)} />
+        <Row k="Balance" v={formatMoney(tally.balance)} />
+      </div>
+      <div className="sub">Recent steps</div>
+      <div className="log">
+        {(tally.results || []).slice(-5).map((r) => (
+          <div key={r.i} className="item">
+            <span>#{r.i} • {r.ts} — {r.info}</span>
+            <b>{formatMoney(r.cost)}</b>
+          </div>
+        ))}
+        {(tally.results || []).length === 0 && <div className="muted">No steps yet…</div>}
+      </div>
+      <style jsx>{`
+        .dock { position: fixed; right: 20px; bottom: 20px; width: 260px; background: #fff; border: 1px solid #e5e5ea; border-radius: 14px; padding: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.12); }
+        .head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; }
+        .chip { font-size: 11px; background: #e6f7ed; color: #30d158; border-radius: 999px; padding: 2px 8px; }
+        .rows { font-size: 14px; margin: 8px 0 10px; }
+        .sub { font-size: 12px; color: #6e6e73; margin-bottom: 6px; }
+        .log { max-height: 180px; overflow: auto; border: 1px solid #f0f0f0; border-radius: 10px; padding: 6px; }
+        .item { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 6px 0; border-bottom: 1px solid #f7f7f7; }
+        .item:last-child { border-bottom: 0; }
+        .muted { color: #6e6e73; font-size: 12px; text-align: center; padding: 8px 0; }
+      `}</style>
+    </div>
+  );
+}
+
+function Row({ k, v }) {
+  return (
+    <div className="row">
+      <span>{k}:</span>
+      <b>{v}</b>
+      <style jsx>{`
+        .row { display: flex; justify-content: space-between; padding: 2px 0; }
+      `}</style>
+    </div>
+  );
+}
+
+function wait(ms) {
+  return new Promise((res) => setTimeout(res, ms));
 }
