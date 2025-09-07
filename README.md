@@ -82,3 +82,44 @@ The demo shows:
 ---
 
 ## 📂 Repo Structure
+/components
+FurnaceAsk.jsx      → main dashboard component
+/pages
+index.js            → homepage
+tally.js            → live tally popout
+/api
+tally/save.js     → save tally snapshot
+tally/latest.js   → return latest tally
+slack/post.js     → send Slack alerts
+/styles
+globals.css         → clean Apple-style theme
+
+---
+
+## 🔮 Future Roadmap
+
+Furnace is just the start. Here’s what’s next:
+
+- **Multi-provider adapters** → direct API hooks for OpenAI, Anthropic, Replit, Hugging Face, and more.  
+- **Automatic cost estimates** → detect model + token size automatically, no manual input needed.  
+- **Team dashboards** → shared budget views with role-based access and per-user limits.  
+- **Predictive alerts** → estimate *time-to-burn* based on live usage trends.  
+- **Export & reports** → generate weekly/monthly usage reports for finance & ops teams.  
+- **Cross-platform support** → Windows/Linux tray apps, mobile companion app for spend alerts.  
+
+---
+
+## 👥 Team
+
+Built by **Padraig O’Brien** (solo).  
+Part of the [Global MCP Hackathon](https://www.descope.com/sign-up-global-mcp-hackathon).
+
+---
+
+## 📜 License
+
+MIT License — free to use, modify, and extend.  
+
+---
+
+🔥 *Furnace: the fire alarm for runaway AI spend.*
