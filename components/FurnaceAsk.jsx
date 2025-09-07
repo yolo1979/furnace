@@ -277,25 +277,31 @@ export default function FurnaceAsk() {
           )}
         </div>
 
-        <div className="row">
-          <button onClick={isBurning ? stopAutoBurn : startAutoBurn}>
-            {isBurning ? "Stop" : "Time to Burn (auto)"}
-          </button>
-          <button onClick={resetAll} className="ghost">Reset</button>
-          <a
-            className="ghost"
-            href="/tally"
-            target="_blank"
-            rel="noreferrer"
-            title="Open the pop-out tally window"
-          >
-            Pop out Live Tally
-          </a>
-        </div>
-      </section>
+<div className="row">
+  <button onClick={isBurning ? stopAutoBurn : startAutoBurn}>
+    {isBurning ? "Stop" : "Time to Burn (auto)"}
+  </button>
+  <button onClick={resetAll} className="ghost">
+    Reset
+  </button>
+  <button
+    className="ghost"
+    onClick={() =>
+      window.open(
+        "/tally",
+        "FurnaceTally",
+        "width=400,height=500,left=200,top=200"
+      )
+    }
+    title="Open the pop-out tally window"
+  >
+    Pop out Live Tally
+  </button>
+</div>
+</section>
 
-      {/* docked live tally */}
-      <DockedTally />
+{/* docked live tally */}
+<DockedTally />
 
       <style jsx>{`
         .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px; }

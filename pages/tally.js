@@ -31,7 +31,7 @@ export default function TallyWindow() {
       style={{
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
         padding: "20px",
-        maxWidth: "400px",
+        width: "360px",         // 👈 keeps it compact
         margin: "0 auto",
       }}
     >
