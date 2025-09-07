@@ -28,6 +28,12 @@ export default function FurnaceAsk() {
   const [promptTokens, setPromptTokens] = useState(2000);
   const [completionTokens, setCompletionTokens] = useState(1000);
 
+  // manual step cost input
+  const [stepCost, setStepCost] = useState(0.2);
+
+  // results (for undo / log)
+  const [results, setResults] = useState([]);
+
   // UI / popout sync
   const bcRef = useRef(null);
   const [tracking, setTracking] = useState(false);
@@ -35,6 +41,7 @@ export default function FurnaceAsk() {
   // derived
   const remaining = useMemo(() => Math.max(budget - burned, 0), [budget, burned]);
   const within = useMemo(() => burned <= budget, [burned, budget]);
+  const over = !within;
 
   // connect BroadcastChannel for live tally (dashboard + popout + menubar widget)
   useEffect(() => {
@@ -53,7 +60,7 @@ export default function FurnaceAsk() {
       budget,
       balance,
       remaining,
-      results: extraSteps,
+      results: [...results, ...extraSteps],
       ts: Date.now(),
     };
     try {
@@ -77,12 +84,10 @@ export default function FurnaceAsk() {
   // fetch balance (stub for demo)
   const fetchBalance = async () => {
     // In a real connector, call your provider API here.
-    // We’ll just retain the current value (so the button is “demo-safe”).
     setBalance((b) => b);
   };
 
   // -------- Slack integration helpers --------
-
   async function postToSlack(message) {
     try {
       await fetch("/api/slack/post", {
@@ -91,12 +96,12 @@ export default function FurnaceAsk() {
         body: JSON.stringify({ text: message }),
       });
     } catch (e) {
-      // Fail silently for demo; we don’t want UI to break if Slack is down.
       console.warn("Slack post failed:", e);
     }
   }
 
-  // one “result” of an agent step gets tallied here
+  // ---------- core actions ----------
+  // addResult: the ONE place we update burn + push tally + post Slack
   async function addResult(cost, info = "Agent step") {
     const step = {
       i: Date.now(),
@@ -104,9 +109,15 @@ export default function FurnaceAsk() {
       cost: Number(cost || 0),
       info,
     };
+
+    // update results list immediately so pushTally sees it
+    setResults((prev) => [...prev, step]);
+
+    // update burned, broadcast, and post to Slack
     setBurned((prev) => {
       const next = Number((prev + step.cost).toFixed(2));
-      // push to other windows
+
+      // broadcast current state + this new step
       pushTally([step]);
 
       // Slack alert for this step
@@ -122,24 +133,52 @@ export default function FurnaceAsk() {
     });
   }
 
-  // arm/run demo sequence
+  function undo() {
+    setResults((prev) => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      setBurned((b) => Number(Math.max(0, b - Number(last.cost || 0)).toFixed(2)));
+      const next = prev.slice(0, -1);
+      // push updated snapshot (no new steps)
+      setTimeout(() => pushTally([]), 0);
+      return next;
+    });
+  }
+
+  async function finish() {
+    const msg =
+      `✅ Session finished\n` +
+      `• Burned: ${formatMoney(burned)}\n` +
+      `• Budget: ${formatMoney(budget)}\n` +
+      `• Remaining: ${formatMoney(Math.max(budget - burned, 0))}\n` +
+      `• Steps: ${results.length}`;
+    await postToSlack(msg);
+  }
+
+  function popOut() {
+    try {
+      window.open("/tally", "_blank", "noopener,noreferrer,width=480,height=600");
+    } catch {
+      window.open("/tally", "_blank");
+    }
+  }
+
+  // demo sequence (simulated steps)
   const runDemo = async () => {
     setTracking(true);
     pushTally(); // initial snapshot
-
-    // simulate 3 steps
-    await wait(800);
+    await wait(700);
     await addResult(0.25, "Search + plan");
-    await wait(900);
+    await wait(850);
     await addResult(0.4, "Draft + refine");
-    await wait(800);
+    await wait(750);
     await addResult(0.2, "Validate + summarize");
-
     setTracking(false);
   };
 
   const resetAll = () => {
     setBurned(0);
+    setResults([]);
     pushTally([]);
   };
 
@@ -161,6 +200,7 @@ export default function FurnaceAsk() {
     })();
   }, [burned, budget, balance, remaining]);
 
+  // ---------- UI ----------
   return (
     <div className="wrap">
       <header className="hero">
@@ -263,29 +303,53 @@ export default function FurnaceAsk() {
               </label>
             </>
           )}
-        </div>
 
-        <div className="row">
-          <button onClick={runDemo} disabled={tracking}>
-            {tracking ? "Burning…" : "Time to Burn"}
-          </button>
-          <button onClick={resetAll} className="ghost">
-            Reset
-          </button>
-          <a
-            className="ghost"
-            href="/tally"
-            target="_blank"
-            rel="noreferrer"
-            title="Open the pop-out tally window"
-          >
-            Pop out Live Tally
-          </a>
+          {/* Manual step entry */}
+          <label>
+            Step cost
+            <div className="row">
+              <input
+                type="number"
+                value={stepCost}
+                min={0}
+                onChange={(e) => setStepCost(Number(e.target.value || 0))}
+              />
+              <button
+                className="mini"
+                onClick={() => addResult(stepCost, "Manual burn step")}
+                disabled={remaining <= 0}
+                title="Add a single burn step with this cost"
+              >
+                + Burn step
+              </button>
+            </div>
+          </label>
+
+          <label className="span2">
+            Actions
+            <div className="inline">
+              <button className="primary" onClick={runDemo} disabled={tracking}>
+                {tracking ? "Burning…" : "Time to Burn"}
+              </button>
+              <button className="secondary" onClick={undo} disabled={results.length === 0}>
+                Undo
+              </button>
+              <button className="secondary" onClick={finish}>
+                Finish ask
+              </button>
+              <button className="secondary" onClick={popOut}>
+                Pop out Live Tally
+              </button>
+              <button className="ghost" onClick={resetAll}>
+                Reset
+              </button>
+            </div>
+          </label>
         </div>
       </section>
 
       {/* docked live tally (reads BroadcastChannel/localStorage) */}
-      <DockedTally />
+      <DockedTally externalResults={results} />
       <style jsx>{`
         .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px; }
         .hero h1 { margin: 0 0 6px; }
@@ -296,8 +360,12 @@ export default function FurnaceAsk() {
         label { display: grid; gap: 6px; font-size: 14px; color: #1d1d1f; }
         input, select { height: 34px; border: 1px solid #dadada; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #fff; }
         .row { display: flex; gap: 8px; align-items: center; }
+        .inline { display: flex; gap: 8px; flex-wrap: wrap; }
         button { height: 34px; padding: 0 12px; background: #007aff; color: white; border: 0; border-radius: 8px; font-weight: 600; }
+        button.mini { height: 34px; padding: 0 10px; background: #007aff; color: white; border: 0; border-radius: 8px; font-weight: 600; }
         .ghost { background: #f2f2f7; color: #1d1d1f; }
+        .primary {}
+        .secondary { background: #f2f2f7; color: #1d1d1f; }
       `}</style>
     </div>
   );
@@ -335,7 +403,7 @@ function BudgetBar({ burned, budget, within }) {
   );
 }
 
-function DockedTally() {
+function DockedTally({ externalResults = [] }) {
   const [tally, setTally] = useState({ burned: 0, budget: 0, balance: 0, remaining: 0, results: [] });
 
   useEffect(() => {
@@ -348,12 +416,13 @@ function DockedTally() {
       try {
         const raw = localStorage.getItem("furnace:tally");
         if (raw) setTally(JSON.parse(raw));
+        else setTally((t) => ({ ...t, results: externalResults }));
       } catch {}
     };
     pull();
     const intv = setInterval(pull, 1200);
     return () => { chan?.close(); clearInterval(intv); };
-  }, []);
+  }, [externalResults]);
 
   return (
     <div className="dock">
