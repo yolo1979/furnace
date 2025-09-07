@@ -1,12 +1,12 @@
+// components/FurnaceAsk.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const $$ = (n) => `$${Number(n || 0).toFixed(2)}`;
 
-/** OpenAI pricing (USD per 1K tokens). */
 const OPENAI_PRICING = {
   "gpt-4o-mini": { in: 0.1500, out: 0.6000 },
-  "gpt-4o":      { in: 5.0000, out: 15.0000 },
-  "gpt-3.5":     { in: 0.5000, out: 1.5000 },
+  "gpt-4o":      { in: 5.0000,  out: 15.0000 },
+  "gpt-3.5":     { in: 0.5000,  out: 1.5000 },
 };
 
 const PROVIDERS = [
@@ -15,47 +15,40 @@ const PROVIDERS = [
 ];
 
 export default function FurnaceAsk() {
-  // Provider
   const [provider, setProvider] = useState("openai");
-
-  // Inputs as strings (so fields can be blank)
   const [balance, setBalance] = useState("25");
-  const [budget, setBudget]   = useState("5");
+  const [budget, setBudget] = useState("5");
 
-  // Estimator (OpenAI)
   const [model, setModel] = useState("gpt-4o-mini");
   const [promptTok, setPromptTok] = useState("2000");
   const [completionTok, setCompletionTok] = useState("1000");
 
-  // Runtime
-  const [active, setActive]   = useState(false);
-  const [burned, setBurned]   = useState(0);
-  const [results, setResults] = useState([]); // newest first: {i,cost,info,ts}
+  const [active, setActive] = useState(false);
+  const [burned, setBurned] = useState(0);
+  const [results, setResults] = useState([]);
+  const [steps, setSteps] = useState([]);
 
-  // Per-result entry
   const [autoFromTokens, setAutoFromTokens] = useState(true);
   const [runPromptTok, setRunPromptTok] = useState("");
   const [runCompletionTok, setRunCompletionTok] = useState("");
   const [nextCost, setNextCost] = useState("0.10");
 
-  // Numbers
   const balanceNum = Number(balance) || 0;
-  const budgetNum  = Number(budget) || 0;
+  const budgetNum = Number(budget) || 0;
   const price = OPENAI_PRICING[model] || OPENAI_PRICING["gpt-4o-mini"];
 
-  // Estimate before run
   const estimatedTotal = useMemo(() => {
     if (provider !== "openai") return 0;
-    const inTok  = Number(promptTok) || 0;
+    const inTok = Number(promptTok) || 0;
     const outTok = Number(completionTok) || 0;
-    return (inTok/1000)*price.in + (outTok/1000)*price.out;
+    return (inTok / 1000) * price.in + (outTok / 1000) * price.out;
   }, [provider, promptTok, completionTok, price]);
 
   const remaining = Math.max(0, budgetNum - burned);
   const pct = Math.min(100, Math.round((burned / Math.max(1e-9, budgetNum)) * 100));
   const over = burned >= budgetNum;
 
-  // ----- Live Tally Broadcast (pop-out) -----
+  // ------- Broadcast to popout + POST to API for menubar -------
   const channelRef = useRef(null);
   useEffect(() => {
     try { channelRef.current = new BroadcastChannel("furnace-tally"); }
@@ -65,39 +58,58 @@ export default function FurnaceAsk() {
 
   const publishTally = (extra = {}) => {
     const payload = {
-      burned, remaining, budget: budgetNum, balance: balanceNum,
-      results, active, provider, model, ts: Date.now(), ...extra,
+      burned,
+      remaining,
+      budget: budgetNum,
+      balance: balanceNum,
+      results,
+      steps,
+      active,
+      provider,
+      model,
+      ts: Date.now(),
+      ...extra,
     };
-    // BroadcastChannel (fast, same-origin tabs)
+
+    // pop-out window
     try { channelRef.current?.postMessage(payload); } catch {}
-    // localStorage fallback (for polling in pop-out)
     try { localStorage.setItem("furnace:tally", JSON.stringify(payload)); } catch {}
+
+    // NEW: send to API so the menubar app can read it
+    try {
+      fetch("/api/tally/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true, // best effort even when navigating away
+      });
+    } catch {}
   };
 
   useEffect(() => { publishTally(); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [burned, remaining, budgetNum, balanceNum, results, active, provider, model]
+    [burned, remaining, budgetNum, balanceNum, results, steps, active, provider, model]
   );
 
-  // Actions
+  // ------- Actions -------
   function start() {
     setActive(true);
     setBurned(0);
     setResults([]);
+    setSteps([]);
     publishTally({ started: true });
   }
 
   function addResult() {
-    if (!active) return;
-    if (over) return; // hard stop at cap
+    if (!active || over) return;
 
     let cost = 0;
     let info = "";
 
     if (provider === "openai" && autoFromTokens) {
-      const inTok  = Number(runPromptTok) || 0;
+      const inTok = Number(runPromptTok) || 0;
       const outTok = Number(runCompletionTok) || 0;
-      cost = (inTok/1000)*price.in + (outTok/1000)*price.out;
+      cost = (inTok / 1000) * price.in + (outTok / 1000) * price.out;
       info = `${inTok} in / ${outTok} out`;
     } else {
       cost = Math.max(0, Number(nextCost) || 0);
@@ -107,6 +119,7 @@ export default function FurnaceAsk() {
 
     const entry = { i: results.length + 1, cost, info, ts: new Date().toLocaleTimeString() };
     setResults((r) => [entry, ...r]);
+    setSteps((s) => [...s, cost]);
     setBurned((b) => b + cost);
   }
 
@@ -114,6 +127,7 @@ export default function FurnaceAsk() {
     if (!active || results.length === 0) return;
     const last = results[0];
     setResults((r) => r.slice(1));
+    setSteps((s) => s.slice(0, -1));
     setBurned((b) => Math.max(0, b - last.cost));
   }
 
@@ -127,44 +141,40 @@ export default function FurnaceAsk() {
 
   function reset() {
     setProvider("openai");
-    setBalance("25"); setBudget("5");
-    setModel("gpt-4o-mini"); setPromptTok("2000"); setCompletionTok("1000");
-    setBurned(0); setResults([]); setActive(false);
-    setAutoFromTokens(true); setRunPromptTok(""); setRunCompletionTok("");
+    setBalance("25");
+    setBudget("5");
+    setModel("gpt-4o-mini");
+    setPromptTok("2000");
+    setCompletionTok("1000");
+    setBurned(0);
+    setResults([]);
+    setSteps([]);
+    setActive(false);
+    setAutoFromTokens(true);
+    setRunPromptTok("");
+    setRunCompletionTok("");
     setNextCost("0.10");
     publishTally({ reset: true });
   }
 
   function fetchBalance() {
     if (provider === "openai") {
-      alert("OpenAI live balance isn’t public. Furnace shows pre-run estimates and live burn per result.");
+      alert("OpenAI live balance isn’t public. Use estimate; Furnace tracks each result live.");
       return;
     }
     alert("Custom provider: enter balance manually.");
   }
 
   function popOut() {
-    // opens /tally pop-out window
-    window.open("/tally", "FurnaceTally", "width=340,height=520")
-    useEffect(() => {
-  const data = { burned, budget, balance, remaining, steps };
-  // BroadcastChannel
-  if ("BroadcastChannel" in window) {
-    const channel = new BroadcastChannel("furnace-tally");
-    channel.postMessage(data);
-    channel.close();
-  }
-  // localStorage fallback
-  localStorage.setItem("furnace-tally", JSON.stringify(data));
-}, [burned, budget, balance, remaining, steps]);
+    window.open("/tally", "FurnaceTally", "width=360,height=560,menubar=no,toolbar=no,location=no,status=no");
   }
 
+  // ------- UI -------
   return (
     <div className="container">
       <h1>🔥 Furnace Dashboard</h1>
       <p>See your balance, set a budget, and tally burn after each result.</p>
 
-      {/* Stats row */}
       <div className="stats">
         <div className="stat"><strong>Balance</strong><span>{$$(balanceNum)}</span></div>
         <div className="stat"><strong>Budget</strong><span>{$$(budgetNum)}</span></div>
@@ -172,14 +182,13 @@ export default function FurnaceAsk() {
         <div className="stat"><strong>Burned</strong><span>{$$(burned)}</span></div>
       </div>
 
-      {/* Budget bar */}
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>Budget usage</div>
           <div className={`budget-status ${over ? "over" : "ok"}`}>{over ? "Over budget" : "Within budget"}</div>
         </div>
         <div className="progress">
-          <div className="progress-bar" style={{ width: `${pct}%`, background: over ? "#ff3b30" : "#007aff" }} />
+          <div className="progress-bar" style={{ width: `${Math.max(4, pct)}%`, background: over ? "#ff3b30" : "#007aff" }} />
         </div>
         <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
           <div>{pct}% of {$$(budgetNum)}</div>
@@ -187,7 +196,6 @@ export default function FurnaceAsk() {
         </div>
       </div>
 
-      {/* Config BEFORE run */}
       {!active && results.length === 0 && (
         <div className="card">
           <div className="form-row">
@@ -241,7 +249,6 @@ export default function FurnaceAsk() {
         </div>
       )}
 
-      {/* RUNNING */}
       {active && (
         <div className="card">
           <div className={`budget-status ${over ? "over" : "ok"}`} style={{marginBottom:12}}>
@@ -279,7 +286,6 @@ export default function FurnaceAsk() {
         </div>
       )}
 
-      {/* AFTER RUN */}
       {!active && results.length > 0 && (
         <div className="card">
           <div className="form-row"><b>This ask used:</b> {$$(burned)}</div>
@@ -289,7 +295,6 @@ export default function FurnaceAsk() {
         </div>
       )}
 
-      {/* Sticky on-page Live Tally (kept) */}
       <div className="liveCard">
         <div className="liveHeader">
           <span>🔥 Live Tally</span>
