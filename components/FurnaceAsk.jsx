@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const $$ = (n) => `$${Number(n || 0).toFixed(2)}`;
 
-/** OpenAI pricing (USD per 1K tokens). Tweak as needed. */
+/** OpenAI pricing (USD per 1K tokens). */
 const OPENAI_PRICING = {
   "gpt-4o-mini": { in: 0.1500, out: 0.6000 },
   "gpt-4o":      { in: 5.0000, out: 15.0000 },
@@ -18,11 +18,11 @@ export default function FurnaceAsk() {
   // Provider
   const [provider, setProvider] = useState("openai");
 
-  // Inputs as STRINGS (so fields can be blank)
+  // Inputs as strings (so fields can be blank)
   const [balance, setBalance] = useState("25");
   const [budget, setBudget]   = useState("5");
 
-  // OpenAI estimator inputs (strings)
+  // Estimator (OpenAI)
   const [model, setModel] = useState("gpt-4o-mini");
   const [promptTok, setPromptTok] = useState("2000");
   const [completionTok, setCompletionTok] = useState("1000");
@@ -30,7 +30,7 @@ export default function FurnaceAsk() {
   // Runtime
   const [active, setActive]   = useState(false);
   const [burned, setBurned]   = useState(0);
-  const [results, setResults] = useState([]); // {i, cost, info, ts}
+  const [results, setResults] = useState([]); // newest first: {i,cost,info,ts}
 
   // Per-result entry
   const [autoFromTokens, setAutoFromTokens] = useState(true);
@@ -55,16 +55,41 @@ export default function FurnaceAsk() {
   const pct = Math.min(100, Math.round((burned / Math.max(1e-9, budgetNum)) * 100));
   const over = burned >= budgetNum;
 
+  // ----- Live Tally Broadcast (pop-out) -----
+  const channelRef = useRef(null);
+  useEffect(() => {
+    try { channelRef.current = new BroadcastChannel("furnace-tally"); }
+    catch { channelRef.current = null; }
+    return () => { try { channelRef.current?.close(); } catch {} };
+  }, []);
+
+  const publishTally = (extra = {}) => {
+    const payload = {
+      burned, remaining, budget: budgetNum, balance: balanceNum,
+      results, active, provider, model, ts: Date.now(), ...extra,
+    };
+    // BroadcastChannel (fast, same-origin tabs)
+    try { channelRef.current?.postMessage(payload); } catch {}
+    // localStorage fallback (for polling in pop-out)
+    try { localStorage.setItem("furnace:tally", JSON.stringify(payload)); } catch {}
+  };
+
+  useEffect(() => { publishTally(); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [burned, remaining, budgetNum, balanceNum, results, active, provider, model]
+  );
+
   // Actions
   function start() {
     setActive(true);
     setBurned(0);
     setResults([]);
+    publishTally({ started: true });
   }
 
   function addResult() {
     if (!active) return;
-    if (over) return; // hard stop at budget cap
+    if (over) return; // hard stop at cap
 
     let cost = 0;
     let info = "";
@@ -81,17 +106,13 @@ export default function FurnaceAsk() {
     if (cost <= 0) return;
 
     const entry = { i: results.length + 1, cost, info, ts: new Date().toLocaleTimeString() };
-    setResults((r) => [entry, ...r]);           // newest on top for the Live Tally
+    setResults((r) => [entry, ...r]);
     setBurned((b) => b + cost);
-
-    // reset token inputs
-    setRunPromptTok("");
-    setRunCompletionTok("");
   }
 
   function undo() {
     if (!active || results.length === 0) return;
-    const last = results[0]; // newest first
+    const last = results[0];
     setResults((r) => r.slice(1));
     setBurned((b) => Math.max(0, b - last.cost));
   }
@@ -101,6 +122,7 @@ export default function FurnaceAsk() {
     const newBal = Math.max(0, balanceNum - burned);
     setBalance(String(Number(newBal.toFixed(2))));
     setActive(false);
+    publishTally({ finished: true });
   }
 
   function reset() {
@@ -110,6 +132,7 @@ export default function FurnaceAsk() {
     setBurned(0); setResults([]); setActive(false);
     setAutoFromTokens(true); setRunPromptTok(""); setRunCompletionTok("");
     setNextCost("0.10");
+    publishTally({ reset: true });
   }
 
   function fetchBalance() {
@@ -120,6 +143,11 @@ export default function FurnaceAsk() {
     alert("Custom provider: enter balance manually.");
   }
 
+  function popOut() {
+    // opens /tally pop-out window
+    window.open("/tally", "FurnaceTally", "width=340,height=520");
+  }
+
   return (
     <div className="container">
       <h1>🔥 Furnace Dashboard</h1>
@@ -127,31 +155,17 @@ export default function FurnaceAsk() {
 
       {/* Stats row */}
       <div className="stats">
-        <div className="stat">
-          <strong>Balance</strong>
-          <span>{$$(balanceNum)}</span>
-        </div>
-        <div className="stat">
-          <strong>Budget (ask)</strong>
-          <span>{$$(budgetNum)}</span>
-        </div>
-        <div className="stat">
-          <strong>Estimate</strong>
-          <span>{$$(provider === "openai" ? estimatedTotal : 0)}</span>
-        </div>
-        <div className="stat">
-          <strong>Burned</strong>
-          <span>{$$(burned)}</span>
-        </div>
+        <div className="stat"><strong>Balance</strong><span>{$$(balanceNum)}</span></div>
+        <div className="stat"><strong>Budget</strong><span>{$$(budgetNum)}</span></div>
+        <div className="stat"><strong>Estimate</strong><span>{$$(provider === "openai" ? estimatedTotal : 0)}</span></div>
+        <div className="stat"><strong>Burned</strong><span>{$$(burned)}</span></div>
       </div>
 
       {/* Budget bar */}
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>Budget usage</div>
-          <div className={`budget-status ${over ? "over" : "ok"}`}>
-            {over ? "Over budget" : "Within budget"}
-          </div>
+          <div className={`budget-status ${over ? "over" : "ok"}`}>{over ? "Over budget" : "Within budget"}</div>
         </div>
         <div className="progress">
           <div className="progress-bar" style={{ width: `${pct}%`, background: over ? "#ff3b30" : "#007aff" }} />
@@ -208,9 +222,10 @@ export default function FurnaceAsk() {
             </>
           )}
 
-          <div>
-            <button className="primary" onClick={start}>Arm Furnace</button>
-            <button className="secondary" onClick={reset} style={{marginLeft:8}}>Reset</button>
+          <div className="inline" style={{marginTop:8}}>
+            <button className="primary" onClick={start}>Time to Burn</button>
+            <button className="secondary" onClick={reset}>Reset</button>
+            <button className="secondary" onClick={popOut}>Pop out Live Tally</button>
           </div>
         </div>
       )}
@@ -244,10 +259,11 @@ export default function FurnaceAsk() {
             </div>
           )}
 
-          <div>
+          <div className="inline">
             <button className="primary" onClick={addResult} disabled={over}>+ Burn step</button>
-            <button className="secondary" onClick={undo} style={{marginLeft:8}}>Undo</button>
-            <button className="secondary" onClick={finish} style={{marginLeft:8}}>Finish ask</button>
+            <button className="secondary" onClick={undo}>Undo</button>
+            <button className="secondary" onClick={finish}>Finish ask</button>
+            <button className="secondary" onClick={popOut}>Pop out Live Tally</button>
           </div>
         </div>
       )}
@@ -258,10 +274,11 @@ export default function FurnaceAsk() {
           <div className="form-row"><b>This ask used:</b> {$$(burned)}</div>
           <div className="form-row"><b>New balance:</b> {$$(balanceNum)}</div>
           <button className="secondary" onClick={reset}>Start new ask</button>
+          <button className="secondary" onClick={popOut} style={{marginLeft:8}}>Pop out Live Tally</button>
         </div>
       )}
 
-      {/* 🔴 Sticky Live Tally Tracker */}
+      {/* Sticky on-page Live Tally (kept) */}
       <div className="liveCard">
         <div className="liveHeader">
           <span>🔥 Live Tally</span>
