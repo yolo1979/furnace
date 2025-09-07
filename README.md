@@ -15,36 +15,43 @@ AI agents are powerful, but invisible costs can burn through your credits faster
 - ✅ Send budget alerts to Slack via secure **Descope Outbound Apps** (no hardcoded tokens)
 
 ---
+
 ## 🚨 The Problem
-Invisible AI spend — tokens, credits, and cycles vanish during agent runs with no visibility…
+Invisible AI spend — tokens, credits, and cycles vanish during agent runs with no visibility.  
+Teams discover the damage only afterwards, when credits are already burned.
 
 ## 💡 The Solution
-Furnace is the fire alarm for runaway AI spend…
+**Furnace is the fire alarm for runaway AI spend.**  
+It shows balance, budget, and live burn rate in real time — with alerts before the fire gets out of control.  
+
+And this isn’t just about OpenAI. Nearly every modern AI platform charges in **tokens, credits, or usage hours**. That’s why Furnace is designed to work universally.
 
 ---
 
 ## 🔑 Who Needs Furnace?
-Furnace isn’t tied to one platform — it’s designed for **any AI provider that charges by credits, tokens, or usage**.
-Today, nearly every major service already uses this model:
+Furnace isn’t tied to one provider — it’s built for **any AI service that bills by credits, tokens, or usage**.  
+Today, nearly every major platform already uses this model:
 
 ### **AI Model Providers**
-- OpenAI – credits & token-based pricing (gpt-4, gpt-4o, gpt-4o-mini, etc.).
-- Anthropic (Claude) – token-based pricing.
-- Mistral – API usage billed per token.
-- Cohere – API credits/token usage.
+- OpenAI – credits & token-based pricing (gpt-4, gpt-4o, gpt-4o-mini, etc.).  
+- Anthropic (Claude) – token-based pricing.  
+- Mistral – API usage billed per token.  
+- Cohere – API credits/token usage.  
 
 ### **Developer Platforms**
-- Replit – cycles (credits) consumed per agent run / AI request.
-- Manus – token-based plan for agent executions.
-- Hugging Face Inference – credit-based usage (per inference call).
+- Replit – cycles (credits) consumed per agent run / AI request.  
+- Manus – token-based plan for agent executions.  
+- Hugging Face Inference – credit-based usage (per inference call).  
 
 ### **Creative / Generative Tools**
-- MidJourney – “fast hours” credit system.
-- Runway ML – credits for video generation.
-- Stable Diffusion APIs (Replicate, Stability AI) – per-credit inference.
+- MidJourney – “fast hours” credit system.  
+- Runway ML – credits for video generation.  
+- Stable Diffusion APIs (Replicate, Stability AI) – per-credit inference.  
 
-🔥 **The point:** Whether you’re building apps, running agents, or generating media, **credits are the new currency of AI** — and they disappear fast.  
+🔥 **The point:** Whether you’re coding, prompting, or generating media, **credits are the new currency of AI** — and they disappear fast.  
 Furnace makes sure you can *see, track, and cap the burn* before it’s too late.
+
+---
 
 ## 🎥 Demo Video
 
