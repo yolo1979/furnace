@@ -145,7 +145,18 @@ export default function FurnaceAsk() {
 
   function popOut() {
     // opens /tally pop-out window
-    window.open("/tally", "FurnaceTally", "width=340,height=520");
+    window.open("/tally", "FurnaceTally", "width=340,height=520")
+    useEffect(() => {
+  const data = { burned, budget, balance, remaining, steps };
+  // BroadcastChannel
+  if ("BroadcastChannel" in window) {
+    const channel = new BroadcastChannel("furnace-tally");
+    channel.postMessage(data);
+    channel.close();
+  }
+  // localStorage fallback
+  localStorage.setItem("furnace-tally", JSON.stringify(data));
+}, [burned, budget, balance, remaining, steps]);
   }
 
   return (
