@@ -204,25 +204,31 @@ export default function FurnaceAsk() {
 
           {/* Budget: fixed text input with sanitizer */}
           <label>
-            Budget for this ask
-            <input
-              type="text"
-              inputMode="decimal"
-              value={budgetStr}
-              onChange={(e) => {
-                const cleaned = cleanMoneyInput(e.target.value);
-                setBudgetStr(cleaned);
-                setBudget(Number(cleaned || 0));
-              }}
-              onBlur={() => {
-                const normalized = (Number(budgetStr || 0))
-                  .toFixed(2)
-                  .replace(/\.00$/, ""); // show clean integer if .00
-                setBudgetStr(normalized);
-                setBudget(Number(normalized));
-              }}
-            />
-          </label>
+          Budget for this ask
+  <input
+    type="text"
+    inputMode="decimal"
+    pattern="[0-9]*"
+    value={String(budget)}
+    onChange={(e) => {
+      // keep only digits
+      let v = e.target.value.replace(/[^\d]/g, "");
+      // strip leading zeros (but allow single "0")
+      v = v.replace(/^0+(?=\d)/, "");
+      if (v === "") v = "0";
+      // cap length if you want, e.g. 6 digits
+      if (v.length > 6) v = v.slice(0, 6);
+      setBudget(Number(v));
+    }}
+    onBlur={(e) => {
+      // final clean-up on blur
+      let v = e.target.value.replace(/[^\d]/g, "");
+      v = v.replace(/^0+(?=\d)/, "");
+      if (v === "") v = "0";
+      setBudget(Number(v));
+    }}
+  />
+</label>
 
           {provider === "openai" && (
             <>
