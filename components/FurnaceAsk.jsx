@@ -2,18 +2,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /* ---------- helpers ---------- */
-const fmt = (n) => `$${Number(n || 0).toFixed(2)}`;
+const formatMoney = (n) => `$${Number(n || 0).toFixed(2)}`;
 
-// Money input sanitizer: allow digits + one dot, trim leading zeros, max 2 decimals.
-function cleanMoneyInput(str) {
-  let v = (str || "").replace(/[^\d.]/g, "");     // keep digits & dot
-  v = v.replace(/^0+(?=\d)/, "");                 // strip leading zeros before a digit
-  v = v.replace(/(\..*)\./g, "$1");               // only one dot total
-  const [i, d] = v.split(".");
-  return d != null ? `${i}.${d.slice(0, 2)}` : i; // at most 2 decimals while typing
-}
-
-// simple, demo pricing (per 1K tokens)
+// simple OpenAI price table (per 1K tokens) for demo
 const OPENAI_PRICES = {
   "gpt-4o-mini":  { prompt: 0.0005, completion: 0.0015 },
   "gpt-4o":       { prompt: 0.005,  completion: 0.015  },
@@ -25,103 +16,164 @@ const PROVIDERS = [
   { id: "replit", label: "Replit (manual balance)" },
 ];
 
-/* ======================================================================= */
+/* ---------- auto-burn knobs ---------- */
+const STEP_COST = 0.25;        // dollars per tick
+const STEP_MS   = 1000;        // 1s per tick
+const WARN_AT   = 0.80;        // 80% budget warning
 
 export default function FurnaceAsk() {
-  /* summary stats */
+  // top summary
   const [balance, setBalance] = useState(25);
-  const [budget, setBudget]   = useState(5);
-  const [burned, setBurned]   = useState(0);
+  const [budget,  setBudget]  = useState(5);
   const [estimate, setEstimate] = useState(0.9);
+  const [burned, setBurned] = useState(0);
 
-  /* form controls */
+  // form
   const [provider, setProvider] = useState("openai");
   const [model, setModel] = useState("gpt-4o-mini");
   const [promptTokens, setPromptTokens] = useState(2000);
   const [completionTokens, setCompletionTokens] = useState(1000);
 
-  /* budget text field (so decimals work while typing) */
-  const [budgetInput, setBudgetInput] = useState(String(budget));
-
-  /* popout / tally broadcast */
+  // UI / popout sync
   const bcRef = useRef(null);
   const [tracking, setTracking] = useState(false);
 
-  /* derived */
-  const remaining = useMemo(() => Math.max(budget - burned, 0), [budget, burned]);
+  // auto-burn state
+  const [isBurning, setIsBurning] = useState(false);
+  const burnTimer = useRef(null);
+  const [warned, setWarned] = useState(false);
+
+  // derived
+  const remaining = useMemo(
+    () => Math.max(budget - burned, 0),
+    [budget, burned]
+  );
   const within = useMemo(() => burned <= budget, [burned, budget]);
 
-  /* BroadcastChannel for live tally */
+  /* ---------- BroadcastChannel for live tally ---------- */
   useEffect(() => {
-    try { bcRef.current = new BroadcastChannel("furnace-tally"); }
-    catch { bcRef.current = null; }
-    return () => bcRef.current?.close?.();
+    try {
+      bcRef.current = new BroadcastChannel("furnace-tally");
+      return () => bcRef.current?.close();
+    } catch {
+      bcRef.current = null;
+    }
   }, []);
 
   const pushTally = (extraSteps = []) => {
-    const payload = {
-      burned, budget, balance, remaining, results: extraSteps, ts: Date.now(),
-    };
+    const payload = { burned, budget, balance, remaining, results: extraSteps, ts: Date.now() };
     try { localStorage.setItem("furnace:tally", JSON.stringify(payload)); } catch {}
     try { bcRef.current?.postMessage(payload); } catch {}
   };
 
-  /* price estimate (OpenAI demo) */
-  useEffect(() => {
-    if (provider !== "openai") return;
-    const p = OPENAI_PRICES[model] || OPENAI_PRICES["gpt-4o-mini"];
-    const dollars =
-      ((promptTokens / 1000) * p.prompt || 0) +
-      ((completionTokens / 1000) * p.completion || 0);
-    setEstimate(Number(dollars.toFixed(2)));
-  }, [provider, model, promptTokens, completionTokens]);
-
-  /* fetch balance (stub for demo) */
-  const fetchBalance = async () => setBalance((b) => b);
-
-  /* Slack posting (optional; safe to no-op) */
-  async function postToSlack(message) {
+  /* ---------- Slack helper ---------- */
+  async function postToSlack(text) {
     try {
       await fetch("/api/slack/post", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: message }),
+        body: JSON.stringify({ text }),
       });
     } catch (e) {
       console.warn("Slack post failed:", e);
     }
   }
 
-  /* add one “result” step */
+  /* ---------- Add a single burn step ---------- */
   async function addResult(cost, info = "Agent step") {
-    const step = { i: Date.now(), ts: new Date().toLocaleTimeString(), cost: Number(cost || 0), info };
+    const step = {
+      i: Date.now(),
+      ts: new Date().toLocaleTimeString(),
+      cost: Number(cost || 0),
+      info,
+    };
     setBurned((prev) => {
       const next = Number((prev + step.cost).toFixed(2));
+      // sync displays
       pushTally([step]);
-      postToSlack(
+      // Slack
+      const msg =
         `🔥 Burn update\n` +
-        `• Step: ${info}\n` +
-        `• Cost: ${fmt(step.cost)}\n` +
-        `• Burned: ${fmt(next)} / Budget: ${fmt(budget)}\n` +
-        `• Remaining: ${fmt(Math.max(budget - next, 0))}`
-      );
+        `• Step: ${step.info}\n` +
+        `• Cost: ${formatMoney(step.cost)}\n` +
+        `• Burned: ${formatMoney(next)} / Budget: ${formatMoney(budget)}\n` +
+        `• Remaining: ${formatMoney(Math.max(budget - next, 0))}`;
+      postToSlack(msg);
       return next;
     });
   }
 
-  /* demo sequence */
-  const runDemo = async () => {
+  /* ---------- Auto-burn loop ---------- */
+  const startAutoBurn = () => {
+    if (isBurning) return;
+    setIsBurning(true);
     setTracking(true);
+    // initialize warning state based on current progress
+    setWarned(budget > 0 ? burned / budget >= WARN_AT : false);
     pushTally();
-    await wait(700); await addResult(0.25, "Search + plan");
-    await wait(800); await addResult(0.4,  "Draft + refine");
-    await wait(700); await addResult(0.2,  "Validate + summarize");
+
+    burnTimer.current = setInterval(() => {
+      // compute where we’ll be after next tick
+      const next = Number((burned + STEP_COST).toFixed(2));
+
+      // warning (once) at WARN_AT %
+      if (!warned && budget > 0 && next >= budget * WARN_AT) {
+        postToSlack(
+          `⚠️ Approaching budget: ${Math.round(WARN_AT*100)}% reached.\n` +
+          `• Burned: ${formatMoney(burned)}\n` +
+          `• Budget: ${formatMoney(budget)}\n` +
+          `• Remaining: ${formatMoney(Math.max(budget - burned, 0))}`
+        );
+        setWarned(true);
+      }
+
+      // if next step would go over the budget, do a final partial step and stop
+      if (next >= budget && budget > 0) {
+        const finalCost = Math.max(budget - burned, 0); // partial to hit cap exactly
+        if (finalCost > 0) addResult(finalCost, "Final step (cap)");
+        postToSlack("⛔ Budget cap reached. Auto-burn stopped.");
+        stopAutoBurn();
+        return;
+      }
+
+      // normal tick
+      addResult(STEP_COST, "Auto burn");
+    }, STEP_MS);
+  };
+
+  const stopAutoBurn = () => {
+    if (burnTimer.current) {
+      clearInterval(burnTimer.current);
+      burnTimer.current = null;
+    }
+    setIsBurning(false);
     setTracking(false);
   };
 
-  const resetAll = () => { setBurned(0); pushTally([]); };
+  /* ---------- Manual reset ---------- */
+  const resetAll = () => {
+    stopAutoBurn();
+    setWarned(false);
+    setBurned(0);
+    pushTally([]);
+  };
 
-  /* keep API snapshot updated (for /tally page & menubar) */
+  /* ---------- Estimate calculation (OpenAI) ---------- */
+  useEffect(() => {
+    if (provider !== "openai") return;
+    const price = OPENAI_PRICES[model] || OPENAI_PRICES["gpt-4o-mini"];
+    const dollars =
+      ((promptTokens / 1000) * price.prompt || 0) +
+      ((completionTokens / 1000) * price.completion || 0);
+    setEstimate(Number(dollars.toFixed(2)));
+  }, [provider, model, promptTokens, completionTokens]);
+
+  const fetchBalance = async () => {
+    // Stubbed for demo: keep value as-is
+    setBalance((b) => b);
+  };
+
+  /* ---------- persist latest snapshot (used by popout/widget) ---------- */
   useEffect(() => {
     (async () => {
       try {
@@ -134,19 +186,6 @@ export default function FurnaceAsk() {
     })();
   }, [burned, budget, balance, remaining]);
 
-  /* ---------- budget input handlers ---------- */
-  useEffect(() => { setBudgetInput(String(budget)); }, [budget]);
-
-  const onBudgetChange = (e) => setBudgetInput(cleanMoneyInput(e.target.value));
-
-  const onBudgetBlur = () => {
-    const v = parseFloat(budgetInput);
-    const next = isNaN(v) ? 0 : Math.max(0, Number(v.toFixed(2)));
-    setBudget(next);
-    setBudgetInput(String(next));
-  };
-
-  /* ============================= UI ============================= */
   return (
     <div className="wrap">
       <header className="hero">
@@ -155,16 +194,17 @@ export default function FurnaceAsk() {
       </header>
 
       <div className="cards">
-        <Stat title="Balance" value={fmt(balance)} />
-        <Stat title="Budget"  value={fmt(budget)} />
-        <Stat title="Estimate" value={fmt(estimate)} />
-        <Stat title="Burned" value={fmt(burned)} />
+        <Stat title="Balance" value={formatMoney(balance)} />
+        <Stat title="Budget" value={formatMoney(budget)} />
+        <Stat title="Estimate" value={formatMoney(estimate)} />
+        <Stat title="Burned" value={formatMoney(burned)} />
       </div>
 
       <BudgetBar burned={burned} budget={budget} within={within} />
 
       <section className="panel">
         <h3>Provider</h3>
+
         <div className="grid">
           <label>
             Provider
@@ -179,7 +219,7 @@ export default function FurnaceAsk() {
             Balance left
             <div className="row">
               <input
-                type="number" inputMode="decimal" step="0.01" min="0"
+                type="number"
                 value={balance}
                 onChange={(e) => setBalance(Number(e.target.value || 0))}
               />
@@ -189,13 +229,12 @@ export default function FurnaceAsk() {
 
           <label>
             Budget for this ask
-            {/* text field so decimals type correctly */}
             <input
-              type="text" inputMode="decimal"
-              value={budgetInput}
-              onChange={onBudgetChange}
-              onBlur={onBudgetBlur}
-              placeholder="0.00"
+              type="number"
+              step="0.01"
+              value={budget}
+              min={0}
+              onChange={(e) => setBudget(Number(e.target.value || 0))}
             />
           </label>
 
@@ -213,8 +252,9 @@ export default function FurnaceAsk() {
               <label>
                 Prompt tokens (estimate)
                 <input
-                  type="number" inputMode="numeric" min="0" step="1"
+                  type="number"
                   value={promptTokens}
+                  min={0}
                   onChange={(e) => setPromptTokens(Number(e.target.value || 0))}
                 />
               </label>
@@ -222,31 +262,39 @@ export default function FurnaceAsk() {
               <label>
                 Completion tokens (estimate)
                 <input
-                  type="number" inputMode="numeric" min="0" step="1"
+                  type="number"
                   value={completionTokens}
+                  min={0}
                   onChange={(e) => setCompletionTokens(Number(e.target.value || 0))}
                 />
               </label>
 
               <label className="span2">
                 Estimated total
-                <input type="text" value={fmt(estimate)} readOnly />
+                <input type="text" value={formatMoney(estimate)} readOnly />
               </label>
             </>
           )}
         </div>
 
         <div className="row">
-          <button onClick={runDemo} disabled={tracking}>
-            {tracking ? "Burning…" : "Time to Burn"}
+          <button onClick={isBurning ? stopAutoBurn : startAutoBurn}>
+            {isBurning ? "Stop" : "Time to Burn (auto)"}
           </button>
           <button onClick={resetAll} className="ghost">Reset</button>
-          <a className="ghost" href="/tally" target="_blank" rel="noreferrer" title="Open the pop-out tally window">
+          <a
+            className="ghost"
+            href="/tally"
+            target="_blank"
+            rel="noreferrer"
+            title="Open the pop-out tally window"
+          >
             Pop out Live Tally
           </a>
         </div>
       </section>
 
+      {/* docked live tally */}
       <DockedTally />
 
       <style jsx>{`
@@ -258,17 +306,15 @@ export default function FurnaceAsk() {
         .grid .span2 { grid-column: span 2; }
         label { display: grid; gap: 6px; font-size: 14px; color: #1d1d1f; }
         input, select { height: 34px; border: 1px solid #dadada; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #fff; }
-        input[readonly] { background: #f7f7f7; }
         .row { display: flex; gap: 8px; align-items: center; }
         button { height: 34px; padding: 0 12px; background: #007aff; color: white; border: 0; border-radius: 8px; font-weight: 600; }
-        .ghost { background: #f2f2f7; color: #1d1d1f; text-decoration: none; display: inline-flex; align-items: center; height: 34px; padding: 0 12px; border-radius: 8px; }
+        .ghost { background: #f2f2f7; color: #1d1d1f; }
       `}</style>
     </div>
   );
 }
 
-/* ---------- subcomponents ---------- */
-
+/* ---------- small UI pieces ---------- */
 function Stat({ title, value }) {
   return (
     <div className="stat">
@@ -289,8 +335,8 @@ function BudgetBar({ burned, budget, within }) {
     <div className="bar">
       <div className="fill" style={{ width: `${pct}%`, background: within ? "#34c759" : "#ff3b30" }} />
       <div className="info">
-        <span>{`0% of ${fmt(budget)}`}</span>
-        <span>{`Remaining ${fmt(Math.max(budget - burned, 0))}`}</span>
+        <span>{`0% of ${formatMoney(budget)}`}</span>
+        <span>{`Remaining ${formatMoney(Math.max(budget - burned, 0))}`}</span>
       </div>
       <style jsx>{`
         .bar { position: relative; height: 10px; background: #f2f2f7; border: 1px solid #e5e5ea; border-radius: 999px; margin: 12px 0 18px; overflow: hidden; }
@@ -306,7 +352,10 @@ function DockedTally() {
 
   useEffect(() => {
     let chan;
-    try { chan = new BroadcastChannel("furnace-tally"); chan.onmessage = (ev) => setTally(ev.data); } catch {}
+    try {
+      chan = new BroadcastChannel("furnace-tally");
+      chan.onmessage = (ev) => setTally(ev.data);
+    } catch {}
     const pull = () => {
       try {
         const raw = localStorage.getItem("furnace:tally");
@@ -315,7 +364,7 @@ function DockedTally() {
     };
     pull();
     const intv = setInterval(pull, 1200);
-    return () => { chan?.close?.(); clearInterval(intv); };
+    return () => { chan?.close(); clearInterval(intv); };
   }, []);
 
   return (
@@ -325,17 +374,17 @@ function DockedTally() {
         <span className="chip">Tracking</span>
       </div>
       <div className="rows">
-        <Row k="Burned"    v={fmt(tally.burned)} />
-        <Row k="Remaining" v={fmt(tally.remaining)} />
-        <Row k="Budget"    v={fmt(tally.budget)} />
-        <Row k="Balance"   v={fmt(tally.balance)} />
+        <Row k="Burned"    v={formatMoney(tally.burned)} />
+        <Row k="Remaining" v={formatMoney(tally.remaining)} />
+        <Row k="Budget"    v={formatMoney(tally.budget)} />
+        <Row k="Balance"   v={formatMoney(tally.balance)} />
       </div>
       <div className="sub">Recent steps</div>
       <div className="log">
         {(tally.results || []).slice(-5).map((r) => (
           <div key={r.i} className="item">
             <span>#{r.i} • {r.ts} — {r.info}</span>
-            <b>{fmt(r.cost)}</b>
+            <b>{formatMoney(r.cost)}</b>
           </div>
         ))}
         {(tally.results || []).length === 0 && <div className="muted">No steps yet…</div>}
@@ -363,8 +412,4 @@ function Row({ k, v }) {
       <style jsx>{`.row { display: flex; justify-content: space-between; padding: 2px 0; }`}</style>
     </div>
   );
-}
-
-function wait(ms) {
-  return new Promise((res) => setTimeout(res, ms));
 }
