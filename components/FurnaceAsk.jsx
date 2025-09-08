@@ -300,6 +300,17 @@ export default function FurnaceAsk() {
 </div>
 </section>
 
+<div className="row">
+  <a
+    href="/api/descope/start"
+    target="_blank"
+    rel="noreferrer"
+    className="ghost"
+  >
+    🔗 Connect Slack
+  </a>
+</div>
+
 {/* docked live tally */}
 <DockedTally />
 
