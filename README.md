@@ -55,7 +55,8 @@ Furnace makes sure you can *see, track, and cap the burn* before it’s too late
 
 ## 🎥 Demo Video
 
-📺 [Watch the 5-minute demo on YouTube](https://youtube.com/your-demo-link-here)  
+📺 [Watch the 5-minute demo on Loom 
+➡️ [Furnace Demo on Loom](https://www.loom.com/share/674cc347d0fd4813a63155fdf4792a9a)
 
 The demo shows:  
 1. Setting a budget and burning step-by-step  
