@@ -11,6 +11,19 @@ const OPENAI_PRICES = {
   "gpt-4.1-mini": { prompt: 0.003,  completion: 0.006  },
 };
 
+// ---- Descope connect (no tokens needed) ----
+function connectSlack() {
+  // This comes from your Vercel env var (public so the browser can read it)
+  const url = process.env.NEXT_PUBLIC_DESCOPE_FLOW_URL;
+  if (!url) {
+    alert("Missing NEXT_PUBLIC_DESCOPE_FLOW_URL");
+    return;
+  }
+  // Send the user to the hosted Descope flow
+  window.location.href = url;
+}
+
+
 const PROVIDERS = [
   { id: "openai", label: "OpenAI (token-based)" },
   { id: "replit", label: "Replit (manual balance)" },
@@ -295,6 +308,23 @@ export default function FurnaceAsk() {
     }
     title="Open the pop-out tally window"
   >
+
+<div className="row">
+  <button onClick={isBurning ? stopAutoBurn : startAutoBurn}>
+    {isBurning ? "Stop" : "Time to Burn (auto)"}
+  </button>
+  <button onClick={resetAll} className="ghost">Reset</button>
+
+  {/* 👇 New: kicks off Descope hosted flow */}
+  <button onClick={connectSlack} className="ghost">
+    Connect Slack (via Descope)
+  </button>
+
+  <a className="ghost" href="/tally" target="_blank" rel="noreferrer">
+    Pop out Live Tally
+  </a>
+</div>
+
     Pop out Live Tally
   </button>
 </div>
